@@ -3,8 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use super::Error;
-use syntax::{Token, Value, Attr, attribute, begindata};
 use structured::Object;
+use syntax::{attribute, begindata, Attr, Token, Value};
 
 use nom::{slice_to_offsets, Err, ErrorKind, IResult};
 use std::collections::HashMap;
@@ -35,44 +35,46 @@ fn nom_error_info<'a, E: Clone>(err: &'a Err<&'a [u8], E>) -> (&'a [u8], ErrorKi
 
 // The code duplication makes me sad, and this ought to be properly tested....
 fn bufferize<I, O, E, F>(mut src: I, mut f: F) -> Result<Option<(usize, O)>, E>
-    where I: BufRead,
-          E: From<io::Error>,
-          F: for<'a> FnMut(&'a [u8]) -> Result<Option<(usize, O)>, E>
+where
+    I: BufRead,
+    E: From<io::Error>,
+    F: for<'a> FnMut(&'a [u8]) -> Result<Option<(usize, O)>, E>,
 {
     let mut big_buf = Vec::new();
     // Non-lexical lifetimes would make this code cleaner.
-    match {
-        let buf = try!(src.fill_buf());
-        if buf.is_empty() {
-            return Ok(None);
-        }
-        match try!(f(buf)) {
-            None => { big_buf.extend_from_slice(buf); None },
-            some @ Some(_) => some
-        }
-    } {
-        Some((used, res)) => {
-            src.consume(used);
-            return Ok(Some((used, res)));
-        },
-        None => {
-            src.consume(big_buf.len());
-        }
-    };
+
+    let buf = src.fill_buf()?;
+
+    if buf.is_empty() {
+        return Ok(None);
+    }
+
+    if let Some((used, res)) = f(buf)? {
+        src.consume(used);
+        return Ok(Some((used, res)));
+    }
+
+    if f(buf)?.is_none() {
+        big_buf.extend_from_slice(buf);
+        src.consume(big_buf.len());
+    }
+
     loop {
         let old_len = big_buf.len();
         big_buf.extend_from_slice({
-            let buf = try!(src.fill_buf());
+            let buf = src.fill_buf()?;
+
             if buf.is_empty() {
                 return Ok(None);
-            } 
+            }
+
             buf
         });
-        match try!(f(&big_buf)) {
+        match f(&big_buf)? {
             Some((used, res)) => {
                 src.consume(used - old_len);
                 return Ok(Some((used, res)));
-            },
+            }
             None => src.consume(big_buf.len() - old_len),
         }
     }
@@ -89,12 +91,12 @@ fn bufferize<I, O, E, F>(mut src: I, mut f: F) -> Result<Option<(usize, O)>, E>
 // that error might *not* be the end of the buffer, depending on how
 // the grammar.  This should be replaced by either reading the entire
 // file into memory or using a handwritten parser.
-fn apply_nom<I, O, P>(mut parser: P, off: Offset, src: I)
-                   -> Result<Option<(Offset, O)>, Error>
-    where I: BufRead,
-          P: for<'a> FnMut(&'a [u8]) -> IResult<&'a [u8], O>
+fn apply_nom<I, O, P>(mut parser: P, off: Offset, src: I) -> Result<Option<(Offset, O)>, Error>
+where
+    I: BufRead,
+    P: for<'a> FnMut(&'a [u8]) -> IResult<&'a [u8], O>,
 {
-    if let Some((used, res)) = try!(bufferize(src, |buf| {
+    if let Some((used, res)) = bufferize(src, |buf| {
         match parser(buf) {
             IResult::Done(rest, res) => {
                 let (used, _) = slice_to_offsets(buf, rest);
@@ -108,18 +110,16 @@ fn apply_nom<I, O, P>(mut parser: P, off: Offset, src: I)
                     Ok(None)
                 } else {
                     let (seen, _) = slice_to_offsets(buf, rest);
-                    Err(Error::ParseError(ParseError{
+                    Err(Error::ParseError(ParseError {
                         byte_offset: off + (seen as Offset),
                         buf_left: rest.len(),
-                        what: what,
-                    }.into()))
+                        what,
+                    }))
                 }
             }
-            IResult::Incomplete(_) => {
-                Ok(None)
-            }
+            IResult::Incomplete(_) => Ok(None),
         }
-    })) {
+    })? {
         Ok(Some((off + (used as Offset), res)))
     } else {
         Ok(None)
@@ -135,9 +135,9 @@ pub struct AttrIter<I: BufRead> {
 impl<I: BufRead> AttrIter<I> {
     pub fn new(src: I) -> Self {
         AttrIter {
-            src: src,
+            src,
             offset: 0,
-            had_error: false
+            had_error: false,
         }
     }
 }
@@ -206,21 +206,21 @@ impl<I: BufRead> Iterator for RawObjectIter<I> {
             match self.inner.next() {
                 Some(Err(err)) => {
                     self.done = true;
-                    return Some(Err(err))
+                    return Some(Err(err));
                 }
                 Some(Ok((key, value))) => {
                     if key == "CKA_CLASS" && !self.acc.is_empty() {
                         let mut next_obj = HashMap::new();
                         next_obj.insert(key, value);
-                        return Some(Ok(mem::replace(&mut self.acc, next_obj)))
+                        return Some(Ok(mem::replace(&mut self.acc, next_obj)));
                     } else {
                         self.acc.insert(key, value);
                     }
-                },
+                }
                 None => {
                     self.done = true;
                     if !self.acc.is_empty() {
-                        return Some(Ok(mem::replace(&mut self.acc, HashMap::new())));
+                        return Some(Ok(mem::take(&mut self.acc)));
                     } else {
                         return None;
                     }
@@ -242,7 +242,7 @@ impl<I: BufRead> From<ObjectIter<I>> for RawObjectIter<I> {
 }
 impl<I: BufRead> From<RawObjectIter<I>> for ObjectIter<I> {
     fn from(inner: RawObjectIter<I>) -> Self {
-        ObjectIter { inner: inner }
+        ObjectIter { inner }
     }
 }
 
@@ -265,8 +265,8 @@ impl<I: BufRead> Iterator for ObjectIter<I> {
                 Some(Ok(obj)) => match Object::from_raw(obj) {
                     Err(err) => return Some(Err(err.into())),
                     Ok(Some(obj)) => return Some(Ok(obj)),
-                    Ok(None) => ()
-                }
+                    Ok(None) => (),
+                },
             };
         }
     }

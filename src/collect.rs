@@ -1,13 +1,7 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-
-// FIXME: this module is no longer about embedding in code; should be renamed.
-
 use std::cmp::{Ord, Ordering};
 
-use structured::{Certificate, Trust, Object, Usage};
 use structured::TrustLevel::*;
+use structured::{Certificate, Object, Trust, Usage};
 
 fn cert_cmp(ca: &Certificate, cb: &Certificate) -> Ordering {
     ca.subject.cmp(&cb.subject)
@@ -25,36 +19,44 @@ pub struct CertData {
 }
 
 impl CertData {
-    pub fn from_iter<E, I>(iter: I) -> Result<Self, E>
-        where I: IntoIterator<Item = Result<Object, E>>
+    pub fn from_objects_iter<E, I>(iter: I) -> Result<Self, E>
+    where
+        I: IntoIterator<Item = Result<Object, E>>,
     {
         let mut certbuf = Vec::new();
         let mut trustbuf = Vec::new();
+
         for thing in iter {
-            match try!(thing) {
+            match thing? {
                 Object::Certificate(cert) => certbuf.push(cert),
                 Object::Trust(trust) => trustbuf.push(trust),
             }
-        }            
-        let mut certs = certbuf.into_boxed_slice();
-        let mut trusts = trustbuf.into_boxed_slice();
-        certs.sort_by(cert_cmp);
-        trusts.sort_by(trust_cmp);
-        Ok(CertData {
-            certs: certs,
-            trusts: trusts,
-        })
-    }
+        }
 
+        let mut certs = certbuf.into_boxed_slice();
+        certs.sort_by(cert_cmp);
+
+        let mut trusts = trustbuf.into_boxed_slice();
+        trusts.sort_by(trust_cmp);
+
+        Ok(CertData { certs, trusts })
+    }
+}
+
+impl CertData {
     pub fn certs(&self) -> &[Certificate] {
         &self.certs
     }
+
     pub fn trusts(&self) -> &[Trust] {
         &self.trusts
     }
 
     pub fn trust_for(&self, issuer: &[u8], serial: &[u8]) -> Option<&Trust> {
-        if let Ok(i) = self.trusts.binary_search_by(|t| trust_cmp_with(t, issuer, serial)) {
+        if let Ok(i) = self
+            .trusts
+            .binary_search_by(|t| trust_cmp_with(t, issuer, serial))
+        {
             Some(&self.trusts[i])
         } else {
             None
@@ -66,15 +68,18 @@ impl CertData {
     }
 
     pub fn trusted_certs(&self, usage: Usage) -> Vec<&Certificate> {
-        self.certs.iter()
+        self.certs
+            .iter()
             .filter(|cert| {
                 self.trust_for_cert(cert)
                     .map_or(MustVerify, |trust| trust.trust_level(usage))
                     == TrustedDelegator
-            }).collect()
+            })
+            .collect()
     }
     pub fn distrusts(&self, usage: Usage) -> Vec<&Trust> {
-        self.trusts.iter()
+        self.trusts
+            .iter()
             .filter(|trust| trust.trust_level(usage) == Distrust)
             .collect()
     }

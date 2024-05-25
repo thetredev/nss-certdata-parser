@@ -4,8 +4,8 @@
 
 extern crate nss_certdata_parser;
 
-use std::fs::File;
 use std::env::args;
+use std::fs::File;
 use std::io::BufReader;
 
 use nss_certdata_parser::reader::AttrIter;
@@ -28,11 +28,11 @@ fn main() {
                     print!("{} MULTILINE_OCTAL", k);
                     for (i, b) in v.into_iter().enumerate() {
                         if i % 16 == 0 {
-                            println!("");
+                            println!(" ");
                         }
                         print!("\\{:03o}", b);
                     }
-                    println!("");
+                    println!(" ");
                     println!("END");
                 }
             }

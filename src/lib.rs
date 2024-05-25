@@ -13,9 +13,10 @@ pub mod structured;
 pub mod syntax;
 
 pub use collect::CertData;
-pub use reader::{ParseError, ObjectIter};
-pub use structured::{StructureError, TypeError, ValueError,
-                     Object, Certificate, Trust, TrustLevel, Usage};
+pub use reader::{ObjectIter, ParseError};
+pub use structured::{
+    Certificate, Object, StructureError, Trust, TrustLevel, TypeError, Usage, ValueError,
+};
 
 use std::io;
 
